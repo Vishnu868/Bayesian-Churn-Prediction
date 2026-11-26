@@ -492,7 +492,7 @@
     "bfmi_min": 0.9806619889408715,
     "mean_tree_depth": 3.01225,
     "mean_step_size": 0.4816741193556524,
-    "sampling_time_s": 7.191629409790039,
+    "sampling_time_s": 7.0891499519348145,
     "chains": 4,
     "draws_per_chain": 1000,
     "tune": 1000,
@@ -506,7 +506,7 @@
     "bfmi_min": 0.9488893977458784,
     "mean_tree_depth": 6.1075,
     "mean_step_size": 0.06099024767096203,
-    "sampling_time_s": 53.696120500564575,
+    "sampling_time_s": 53.89847254753113,
     "chains": 4,
     "draws_per_chain": 1000,
     "tune": 1000,
@@ -550,5 +550,5 @@
     "no_save_models": false
   },
   "threshold": 0.5,
-  "runtime_s": 126.4
+  "runtime_s": 128.9
 }

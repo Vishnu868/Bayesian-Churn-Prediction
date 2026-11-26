@@ -331,7 +331,7 @@
     "bfmi_min": 0.9781061569090086,
     "mean_tree_depth": 3.017,
     "mean_step_size": 0.534215633002317,
-    "sampling_time_s": 7.722729206085205,
+    "sampling_time_s": 7.58522891998291,
     "chains": 4,
     "draws_per_chain": 1000,
     "tune": 1000,
@@ -376,5 +376,5 @@
     "no_save_models": false
   },
   "threshold": 0.5,
-  "runtime_s": 49.0
+  "runtime_s": 49.4
 }

@@ -29,9 +29,23 @@ def fit_one(Ztr, ytr, Zte, yte, sigma, args, names):
               "beta_abs_mean": float(np.abs(b.posterior_samples()[1].mean(0)).mean()),
               "intercept_mean": float(b.posterior_samples()[0].mean()), **{f"diag_{k}": v for k, v in
               b.diagnostics().items() if k in ("max_rhat", "min_ess_bulk", "divergences")}})
-    print(f"  {names[0][:2]} sigma={sigma:<6} AUC {r['ROC-AUC']:.4f} logloss {r['LogLoss']:.4f} "
+    print(f"  {'PCA' if names[0] == 'PC1' else 'one-hot'} sigma={sigma:<6} AUC {r['ROC-AUC']:.4f} logloss {r['LogLoss']:.4f} "
           f"elpd_loo {r['elpd_loo']:.1f} ± {r['elpd_loo_se']:.1f}", flush=True)
     return r
+
+
+def loo_compare(Ztr, ytr, Otr, args, pca_names, oh_names):
+    """Paired PSIS-LOO comparison (az.compare) of the PCA model vs the one-hot model, both with sigma = 1."""
+    fits = {}
+    for name, X, names in [("PCA (16 comps)", Ztr, pca_names), ("one-hot (23 cols)", Otr, oh_names)]:
+        b = BayesianLogisticRegression(draws=args.draws, tune=args.tune, chains=args.chains, seed=args.seed,
+                                       coords=names).fit(X, ytr, log_likelihood=True)
+        fits[name] = b.idata_
+    cmp = az.compare(fits, ic="loo")
+    out = {m: {k: float(cmp.loc[m, k]) for k in ("rank", "elpd_loo", "p_loo", "elpd_diff", "se", "dse", "weight")}
+           for m in cmp.index}
+    print(cmp.round(2).to_string(), flush=True)
+    return out
 
 
 def main():
@@ -57,12 +71,16 @@ def main():
                     lambda: fit_one(fp.transform(Xtr), ytr, fp.transform(Xte), yte, s, args, fp.component_names()))})
     rows.append({"features": "one-hot (23 cols)", **cached(os.path.join(args.out, "cache", "onehot_1.0.json"),
                 lambda: fit_one(fo.transform(Xotr), ytr, fo.transform(Xote), yte, 1.0, args, list(Xo.columns)))})
+    comparison = cached(os.path.join(args.out, "cache", "loo_compare.json"),
+                        lambda: loo_compare(fp.transform(Xtr), ytr, fo.transform(Xotr), args, fp.component_names(),
+                                            list(Xo.columns)))
     df = pd.DataFrame(rows)
-    save_json({"rows": rows}, os.path.join(args.out, "metrics.json"))
+    save_json({"rows": rows, "loo_compare": comparison}, os.path.join(args.out, "metrics.json"))
     cols = ["features", "prior_sigma", "ROC-AUC", "LogLoss", "Brier", "F1", "elpd_loo", "elpd_loo_se", "p_loo",
             "hdi_width_mean", "beta_abs_mean"]
     with open(os.path.join(args.out, "table.md"), "w") as f:
-        f.write(df[cols].to_markdown(index=False, floatfmt=".4f") + "\n")
+        f.write(df[cols].to_markdown(index=False, floatfmt=".4f") + "\n\nPaired PSIS-LOO comparison (sigma = 1):\n\n")
+        f.write(pd.DataFrame(comparison).T.to_markdown(floatfmt=".2f") + "\n")
     print(df[cols].round(4).to_string(index=False))
 
 
