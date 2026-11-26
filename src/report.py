@@ -1,69 +1,84 @@
-"""Generates diagnostic plots and a self-contained HTML report."""
+"""Self-contained HTML report (figures embedded as base64) built from a results directory.
+
+    python src/report.py results/main        # -> results/main/report.html
+"""
+from __future__ import annotations
+
 import base64
-import io
+import html
+import json
+import os
+import sys
 
-import arviz as az
-import matplotlib
+import pandas as pd
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
+SECTIONS = [
+    ("PCA feature analysis", ["pca_variance.png"]),
+    ("Model performance", ["roc_pr.png", "confusion_matrices.png"]),
+    ("Calibration", ["calibration.png"]),
+    ("Prediction uncertainty", ["uncertainty_band.png", "uncertainty_analysis.png"]),
+    ("Posterior predictive check", ["ppc_train.png"]),
+    ("HMC diagnostics", ["trace.png", "rank.png", "energy.png", "forest.png", "posterior_corr.png"]),
+    ("Interpretable model (one-hot features)", ["onehot_coefficients.png"]),
+]
 
-
-def _fig_to_b64(fig) -> str:
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode()
-
-
-def _img(fig) -> str:
-    return f'<img src="data:image/png;base64,{_fig_to_b64(fig)}"/>'
-
-
-def pca_plot(pca):
-    fig, ax = plt.subplots(figsize=(7, 4))
-    cum = np.cumsum(pca.explained_variance_ratio_)
-    ax.bar(range(1, len(cum) + 1), pca.explained_variance_ratio_, label="per component")
-    ax.plot(range(1, len(cum) + 1), cum, marker="o", color="crimson", label="cumulative")
-    ax.axhline(0.95, ls="--", color="grey")
-    ax.set_xlabel("Principal component"); ax.set_ylabel("Explained variance"); ax.legend()
-    return fig
-
-
-def uncertainty_plot(mean, std):
-    fig, ax = plt.subplots(figsize=(7, 4))
-    order = np.argsort(mean)
-    ax.plot(mean[order], color="navy", label="posterior mean")
-    ax.fill_between(range(len(mean)), (mean - 2 * std)[order], (mean + 2 * std)[order],
-                    alpha=0.3, label="±2 SD")
-    ax.set_xlabel("Test customers (sorted)"); ax.set_ylabel("P(churn)"); ax.legend()
-    return fig
+CSS = """
+:root{--bg:#ffffff;--ink:#191919;--muted:#666;--card:#f3f6fb;--line:#d8dee8}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#191919;--ink:#efefef;--muted:#9c9c9c;
+--card:#232830;--line:#3a404a}}
+:root[data-theme="dark"]{--bg:#191919;--ink:#efefef;--muted:#9c9c9c;--card:#232830;--line:#3a404a}
+body{font-family:system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink);max-width:1100px;
+margin:auto;padding:16px 16px 48px}
+.kpi{display:inline-block;margin:4px;padding:10px 16px;border-radius:8px;background:var(--card)}
+.kpi b{display:block;font-size:12px;color:var(--muted);font-weight:600}
+table{border-collapse:collapse;font-size:13px;margin:8px 0;display:block;overflow-x:auto}
+td,th{border:1px solid var(--line);padding:5px 9px;text-align:right}th:first-child,td:first-child{text-align:left}
+img{max-width:100%;background:#fff;border-radius:6px;margin:6px 0}
+.note{color:var(--muted);font-size:13px}
+"""
 
 
-def build_report(results: dict, pca, idata, mean, std, out_path: str, meta: dict):
-    metrics = pd.DataFrame(results).T.round(4).to_html(classes="tbl")
-    summary = az.summary(idata, var_names=["intercept", "beta"], round_to=4).to_html(classes="tbl")
-    trace = az.plot_trace(idata, var_names=["intercept", "beta"], compact=True)
-    forest = az.plot_forest(idata, var_names=["intercept", "beta"], combined=True)
-    energy = az.plot_energy(idata)
+def _img(path):
+    with open(path, "rb") as f:
+        return f'<img alt="{html.escape(os.path.basename(path))}" src="data:image/png;base64,{base64.b64encode(f.read()).decode()}"/>'
 
-    html = f"""<!doctype html><html><head><meta charset="utf-8"><title>Bayesian Churn Report</title>
-<style>body{{font-family:Segoe UI,Arial;max-width:1100px;margin:auto;padding:24px;color:#222}}
-.kpi{{display:inline-block;margin:6px;padding:12px 18px;border-radius:8px;background:#eef3ff}}
-.tbl{{border-collapse:collapse}} .tbl td,.tbl th{{border:1px solid #ccc;padding:6px 10px}}
-img{{max-width:100%}}</style></head><body>
-<h1>Bayesian Churn Prediction</h1><p>Probabilistic reasoning with HMC parameter learning</p>
-{''.join(f'<div class="kpi"><b>{k}</b><br>{v}</div>' for k, v in meta.items())}
-<h2>PCA Feature Analysis</h2>{_img(pca_plot(pca))}
-<h2>Model Performance</h2>{metrics}
-<h2>Posterior Parameter Summary</h2>{summary}
-<h2>Prediction Uncertainty</h2>{_img(uncertainty_plot(mean, std))}
-<h2>HMC Diagnostics</h2>
-<h3>Trace plots</h3>{_img(trace.ravel()[0].figure)}
-<h3>Forest plot</h3>{_img(forest.ravel()[0].figure)}
-<h3>Energy</h3>{_img(energy.figure)}
-</body></html>"""
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(html)
+
+def build_report(out_dir: str) -> str:
+    with open(os.path.join(out_dir, "metrics.json")) as f:
+        M = json.load(f)
+    info, d, u = M["info"], M["bayes_diagnostics"], M["uncertainty"]
+    kpis = {
+        "Customers": f"{info['n_customers']:,}", "Features": info["n_features"],
+        "PCA components": f"{info['pca_components']} ({info['pca_variance_retained']:.1%})",
+        "Churn rate": f"{info['churn_rate']:.1%}", "Train / test": f"{info['n_train']:,} / {info['n_test']:,}",
+        "Posterior draws": f"{d['total_draws']:,}", "Max R-hat": f"{d['max_rhat']:.3f}",
+        "Divergences": d["divergences"],
+    }
+    tbl = pd.DataFrame({**M["test_metrics"], **(M.get("test_metrics_no_pca") or {})}).T.round(4)
+    parts = [f"<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+             f"<title>Bayesian Churn Report</title><style>{CSS}</style></head><body>",
+             "<h1>Bayesian Churn Prediction</h1>",
+             f"<p class='note'>Data: {html.escape(info['data_source'])}"
+             + (" · <b>LEGACY run: customerID kept as a feature (reproduces original README; not valid)</b>"
+                if info.get("legacy_keep_customerID") else "") + "</p>",
+             "".join(f"<div class='kpi'><b>{k}</b>{v}</div>" for k, v in kpis.items()),
+             "<h2>Test-set metrics (threshold 0.5)</h2>", tbl.to_html(),
+             "<h2>Posterior summary</h2>",
+             pd.read_csv(os.path.join(out_dir, "posterior_summary.csv"), index_col=0).round(4).to_html(),
+             f"<p class='note'>Mean 94% HDI width of P(churn): {u['hdi_width_mean']:.3f} "
+             f"(median {u['hdi_width_median']:.3f}); {u['frac_hdi_straddles_0.5']:.1%} of test customers have an HDI "
+             f"that straddles 0.5.</p>"]
+    fig = os.path.join(out_dir, "figures")
+    for title, files in SECTIONS:
+        present = [p for p in (os.path.join(fig, f) for f in files) if os.path.exists(p)]
+        if present:
+            parts.append(f"<h2>{title}</h2>" + "".join(_img(p) for p in present))
+    parts.append("</body></html>")
+    path = os.path.join(out_dir, "report.html")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(parts))
+    return path
+
+
+if __name__ == "__main__":
+    print(build_report(sys.argv[1] if len(sys.argv) > 1 else "results/main"))

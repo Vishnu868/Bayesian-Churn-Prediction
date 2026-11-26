@@ -1,0 +1,20 @@
+{
+  "rows_raw":7043,
+  "rows_clean":7032,
+  "dropped_blank_TotalCharges":11,
+  "churn_rate":0.2657849829,
+  "churn_by_contract":{
+    "Month-to-month":0.4271,
+    "One year":0.1128,
+    "Two year":0.0285
+  },
+  "churn_by_internet":{
+    "DSL":0.19,
+    "Fiber optic":0.4189,
+    "No":0.0743
+  },
+  "tenure_median_churn_vs_stay":[
+    10.0,
+    38.0
+  ]
+}
