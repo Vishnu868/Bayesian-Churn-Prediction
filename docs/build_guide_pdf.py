@@ -136,8 +136,27 @@ def TABLE(rows, widths, header=True, bold_rows=()):
     story.append(Spacer(1, 8))
 
 
+COMPACT = os.environ.get("GUIDE_COMPACT")      # e.g. GUIDE_COMPACT=1: JPEG figures for a < 3 MB copy
+
+
+def _compact(path):
+    """Re-encode a PNG figure as a JPEG (white background) in a temp dir, for a small PDF."""
+    import tempfile
+
+    from PIL import Image as PILImage
+    out = os.path.join(tempfile.gettempdir(), "guide_compact_" + os.path.basename(path).replace(".png", ".jpg"))
+    im = PILImage.open(path).convert("RGBA")
+    bg = PILImage.new("RGB", im.size, "white")
+    bg.paste(im, mask=im.split()[3])
+    if bg.width > 1800:
+        bg = bg.resize((1800, round(bg.height * 1800 / bg.width)), PILImage.LANCZOS)
+    bg.save(out, "JPEG", quality=80, optimize=True)
+    return out
+
+
 def FIGURE(rel, caption, width=16.4):
-    img = Image(os.path.join(ROOT, rel))
+    path = os.path.join(ROOT, rel)
+    img = Image(_compact(path) if COMPACT else path)
     ratio = img.imageHeight / img.imageWidth
     img.drawWidth, img.drawHeight = width * cm, width * cm * ratio
     story.append(KeepTogether([img, Spacer(1, 3), Paragraph(caption, S["cap"])]))
@@ -917,5 +936,8 @@ class Doc(BaseDocTemplate):
 
 
 if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        OUT = sys.argv[1]
     Doc(OUT).multiBuild(story)
     print("wrote", OUT)
